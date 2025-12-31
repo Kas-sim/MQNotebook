@@ -11,41 +11,27 @@ def ingest():
 
     documents = SimpleDirectoryReader(
         DATA_PATH,
-        file_metadata= lambda x: {
-            "source": x
-        }
+        file_metadata=lambda x: {"source": x}
     ).load_data()
 
-    parser = SentenceSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP    
-    )
+    embed_model = HuggingFaceEmbedding(model_name=EMBED_MODEL)
 
-    nodes = parser.get_nodes_from_documents(documents)
-
-    embed_model = HuggingFaceEmbedding(
-        model_name=EMBED_MODEL
-    )
-
-    db = chromadb.Client(
-        Settings(
-            persist_directory=CHROMA_PATH,
-            anonymized_telemtry=False
-        )
-    )
-
+    db = chromadb.PersistentClient(path=CHROMA_PATH)
     collection = db.get_or_create_collection(COLLECTION_NAME)
 
-    vector_store = ChromaVectorStore(
-        chroma_collection=collection
-    )
+    vector_store = ChromaVectorStore(chroma_collection=collection)
 
-    VectorStoreIndex(
-        nodes,
+    print("Vectors BEFORE ingest:", collection.count())
+
+    VectorStoreIndex.from_documents(
+        documents,
         vector_store=vector_store,
         embed_model=embed_model
     )
 
-    db.persist()
+    print("Vectors AFter ingest: ", collection.count())
     print("Ingestion Completed! Vectors persisted ;)")
 
+# Run this script only if it is directly run - not when imported
+if __name__ == "__main__":
+    ingest()

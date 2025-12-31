@@ -4,6 +4,7 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.llms.ollama import Ollama
 import chromadb
 from chromadb.config import Settings
+
 from settings import *
 
 def query():

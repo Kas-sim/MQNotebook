@@ -10,21 +10,41 @@ from settings import *
 def ingest():
 
     documents = SimpleDirectoryReader(
-        DATA_PATH,
-        file_metadata=lambda x: {"source": x}
+        "data/",
+        file_metadata=lambda x: {
+            "source": x,
+            "type": "local_file"
+        }
     ).load_data()
 
-    embed_model = HuggingFaceEmbedding(model_name=EMBED_MODEL)
+    node_parser = SentenceSplitter(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP
+    )
 
-    db = chromadb.PersistentClient(path=CHROMA_PATH)
+    nodes = node_parser.get_nodes_from_documents(
+        documents,
+        show_progress=True
+    )
+
+    embed_model = HuggingFaceEmbedding(
+        model_name=EMBED_MODEL
+    )
+
+    db = chromadb.Client(
+        Settings(
+            persist_directory=CHROMA_PATH,
+            anonymized_telemetry=False
+        )
+    )
     collection = db.get_or_create_collection(COLLECTION_NAME)
 
-    vector_store = ChromaVectorStore(chroma_collection=collection)
+    vector_store = ChromaVectorStore(
+        chroma_collection=collection
+    )
 
-    print("Vectors BEFORE ingest:", collection.count())
-
-    VectorStoreIndex.from_documents(
-        documents,
+    index = VectorStoreIndex(
+        nodes,
         vector_store=vector_store,
         embed_model=embed_model
     )

@@ -1,3 +1,4 @@
+DATA_PATH = "/data"
 CHROMA_PATH = "./chromadb"
 COLLECTION_NAME = "rag_docs"
 

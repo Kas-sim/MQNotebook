@@ -1,57 +1,53 @@
-from llama_index.core import SimpleDirectoryReader, VectorStoreIndex
+import os
+from llama_index.core import SimpleDirectoryReader
+from llama_index.core.ingestion import IngestionPipeline, IngestionCache
 from llama_index.core.node_parser import SentenceSplitter
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
-import chromadb
-from chromadb.config import Settings
+from llama_index.core.storage.docstore import SimpleDocumentStore
+import llama_index.core.storage.kvstore as kvstore
+from config import get_collection, Settings
 
-from settings import *
+def run_ingestion():
+    print("🚀 Starting Local/Free Ingestion...")
+    
+    if not os.path.exists("./data"):
+        os.makedirs("./data")
+        print("📂 Created ./data folder. Put your files here.")
+        return
 
-def ingest():
+    # 1. Load Data
+    documents = SimpleDirectoryReader("./data").load_data()
+    print(f"📄 Loaded {len(documents)} documents.")
 
-    documents = SimpleDirectoryReader(
-        "data/",
-        file_metadata=lambda x: {
-            "source": x,
-            "type": "local_file"
-        }
-    ).load_data()
+    # 2. Connect to Database
+    chroma_collection = get_collection()
+    vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
 
-    node_parser = SentenceSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP
+    # 3. Setup Cache (Saves processing time)
+    cache_path = "./ingestion_cache.json"
+    cache = IngestionCache(
+        cache=kvstore.SimpleKVStore.from_persist_path(cache_path) 
+        if os.path.exists(cache_path) else kvstore.SimpleKVStore(),
+        collection="pipeline_cache"
     )
 
-    nodes = node_parser.get_nodes_from_documents(
-        documents,
-        show_progress=True
-    )
-
-    embed_model = HuggingFaceEmbedding(
-        model_name=EMBED_MODEL
-    )
-
-    db = chromadb.Client(
-        Settings(
-            persist_directory=CHROMA_PATH,
-            anonymized_telemetry=False
-        )
-    )
-    collection = db.get_or_create_collection(COLLECTION_NAME)
-
-    vector_store = ChromaVectorStore(
-        chroma_collection=collection
-    )
-
-    index = VectorStoreIndex(
-        nodes,
+    # 4. Pipeline (Uses Local Embeddings from config.py)
+    pipeline = IngestionPipeline(
+        transformations=[
+            SentenceSplitter(chunk_size=512, chunk_overlap=32), # Smaller chunks = More precision
+            Settings.embed_model, # Uses the HuggingFace local model
+        ],
         vector_store=vector_store,
-        embed_model=embed_model
+        cache=cache,
+        docstore=SimpleDocumentStore()
     )
 
-    print("Vectors AFter ingest: ", collection.count())
-    print("Ingestion Completed! Vectors persisted ;)")
+    # 5. Run
+    nodes = pipeline.run(documents=documents)
+    pipeline.cache.persist(cache_path)
 
-# Run this script only if it is directly run - not when imported
+    print(f"✅ Success! Processed {len(nodes)} chunks.")
+    print(f"💾 Stored locally in {"./chroma_db"}")
+
 if __name__ == "__main__":
-    ingest()
+    run_ingestion()

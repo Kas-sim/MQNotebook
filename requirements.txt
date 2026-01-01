@@ -60,6 +60,8 @@ llama-index-indices-managed-llama-cloud==0.9.4
 llama-index-instrumentation==0.4.2
 llama-index-llms-ollama==0.9.1
 llama-index-llms-openai==0.6.12
+llama-index-llms-openai-like==0.5.3
+llama-index-llms-openrouter==0.4.2
 llama-index-readers-file==0.5.6
 llama-index-readers-llama-parse==0.5.1
 llama-index-vector-stores-chroma==0.5.5

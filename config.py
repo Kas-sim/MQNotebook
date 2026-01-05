@@ -7,7 +7,7 @@ import chromadb
 
 load_dotenv()
 api_key = os.getenv("OPENROUTER_API_KEY")
-model_name = os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-20b")
+model_name = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
 
 if not api_key:
     raise ValueError("❌ OPENROUTER_API_KEY not found in .env file")
@@ -19,7 +19,7 @@ if not api_key:
 Settings.llm = OpenRouter(
     api_key=api_key,
     model=model_name,
-    temperature=0.1,
+    temperature=0.5,
     max_tokens=512, # Limit output to save tokens if needed
     context_window=4096 
 )

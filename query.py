@@ -20,17 +20,17 @@ def query_rag(user_query):
     # This formats the retrieved chunk. 
     # The LLM will see: "File: report.pdf | Context: The revenue was 5M..."
     # This enables the LLM to "read" the filename and cite it.
+
     text_qa_template_str = (
-        "Context information is below.\n"
+        "Context information:\n"
         "---------------------\n"
         "{context_str}\n"
         "---------------------\n"
-        "Given the context information and not prior knowledge, "
-        "answer the query.\n"
-        "IMPORTANT: You MUST cite the filenames used for your answer.\n"
-        "Format: Use Markdown. Include a '## References' section at the end.\n"
-        "Query: {query_str}\n"
-        "Answer: "
+        "Using the context above, answer this question: {query_str}\n\n"
+        "Requirements:\n"
+        "1. Be concise.\n"
+        "2. Mention the source filenames provided in the context.\n"
+        "3. Use Markdown formatting."
     )
     text_qa_template = PromptTemplate(text_qa_template_str)
 
@@ -46,7 +46,7 @@ def query_rag(user_query):
     response = query_engine.query(user_query)
 
     print("\n🤖 Answer:")
-    print(response)
+    print(str(response))
 
     # 5. Explicit Metadata Dump (Verification)
     # This is a "debug" view to double-check what files were actually used.

@@ -48,7 +48,7 @@ def query_rag(user_query):
     ],
     llm=GlobalSettings.llm,
     similarity_top_k=15,
-    num_queries=3,
+    num_queries=2,
     mode="reciprocal_rerank",
     use_async=False,
     verbose=True

@@ -19,8 +19,8 @@ if not api_key:
 Settings.llm = OpenRouter(
     api_key=api_key,
     model=model_name,
-    temperature=0.5,
-    max_tokens=512, # Limit output to save tokens if needed
+    temperature=0.4,
+    max_tokens=1500, # Limit output to save tokens if needed
     context_window=4096 
 )
 

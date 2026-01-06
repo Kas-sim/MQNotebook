@@ -36,7 +36,7 @@ db = chromadb.Client(
         anonymized_telemetry=False
     )
 )
-db.persist()
+# db.persist()
 collection = db.get_or_create_collection("rag_docs")
 
 vector_store = ChromaVectorStore(

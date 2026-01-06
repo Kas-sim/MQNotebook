@@ -7,7 +7,7 @@ import chromadb
 
 load_dotenv()
 api_key = os.getenv("OPENROUTER_API_KEY")
-model_name = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
+model_name = os.getenv("OPENROUTER_MODEL", "mistralai/mistral-7b-instruct:free")
 
 if not api_key:
     raise ValueError("❌ OPENROUTER_API_KEY not found in .env file")

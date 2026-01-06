@@ -20,8 +20,9 @@ Settings.llm = OpenRouter(
     api_key=api_key,
     model=model_name,
     temperature=0.4,
-    max_tokens=1500, # Limit output to save tokens if needed
-    context_window=4096 
+    max_tokens=1024, # Limit output to save tokens if needed
+    context_window=4096,
+    request_timeout=120.0
 )
 
 # EMBEDDINGS: Local & Free (Runs on CPU/GPU)

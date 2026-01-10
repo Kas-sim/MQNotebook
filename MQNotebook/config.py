@@ -1,4 +1,3 @@
-# config.py
 import os
 import shutil
 import time
@@ -11,7 +10,6 @@ from llama_index.core.postprocessor import SentenceTransformerRerank
 
 load_dotenv()
 
-# We will generate a unique DB path for this specific run to avoid locks
 SESSION_ID = str(uuid.uuid4())[:8]
 TEMP_DATA_DIR = f"./temp_data_{SESSION_ID}"
 DB_DIR = f"./temp_chroma_db_{SESSION_ID}"
@@ -46,7 +44,6 @@ def cleanup_old_sessions():
     root = "."
     for item in os.listdir(root):
         if os.path.isdir(item) and (item.startswith("temp_data_") or item.startswith("temp_chroma_db_")):
-            # Skip current session
             if SESSION_ID in item:
                 continue
             try:

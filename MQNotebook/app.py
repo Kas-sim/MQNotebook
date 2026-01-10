@@ -1,113 +1,93 @@
 import streamlit as st
-from config import init_settings, get_reranker, cleanup_old_sessions
+import uuid
+# Import new config and processor functions
+from config import init_settings, get_reranker, cleanup_on_startup
 from processor import process_documents, get_chat_engine
 
-# ---------------------------
-# App Bootstrap
-# ---------------------------
-cleanup_old_sessions()
+# 1. Run cleanup only once on server start
+if "startup_done" not in st.session_state:
+    cleanup_on_startup()
+    st.session_state.startup_done = True
 
-st.set_page_config(
-    page_title="MQNotebook",
-    page_icon="📘",
-    layout="wide"
-)
+st.set_page_config(page_title="MQNotebook Pro", page_icon="🧠", layout="wide")
 
 @st.cache_resource
-def setup_backend():
+def setup_pipeline():
     init_settings()
     return get_reranker()
 
-reranker = setup_backend()
+try:
+    reranker = setup_pipeline()
+except Exception as e:
+    st.error(f"Startup Error: {e}")
+    st.stop()
 
-# ---------------------------
-# Sidebar (Enterprise Simple)
-# ---------------------------
-with st.sidebar:
-    st.markdown("## MQNotebook")
-    st.caption("Private • Local • RAG")
-
-    uploaded_files = st.file_uploader(
-        "Documents",
-        accept_multiple_files=True,
-        type=["pdf", "docx", "pptx", "xlsx", "txt", "md", "png", "jpg", "jpeg"]
-    )
-
-    ingest = st.button("Ingest", use_container_width=True)
-
-    st.divider()
-
-    if st.button("New Session", use_container_width=True):
-        st.session_state.clear()
-        st.rerun()
-
-# ---------------------------
-# Session State
-# ---------------------------
-if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Ready."}
-    ]
-
+# Initialize session state for chat engine
 if "chat_engine" not in st.session_state:
     st.session_state.chat_engine = None
+if "messages" not in st.session_state:
+    st.session_state.messages = [{"role": "assistant", "content": "Ready. Upload your slides (PDF/PPTX) or docs."}]
 
-# ---------------------------
-# Ingestion
-# ---------------------------
-if ingest and uploaded_files:
-    with st.spinner("Indexing documents..."):
-        try:
-            index = process_documents(uploaded_files)
-            st.session_state.chat_engine = get_chat_engine(index, reranker)
-            st.success(f"Ingested {len(uploaded_files)} file(s)")
-        except Exception as e:
-            st.error("Ingestion failed")
+with st.sidebar:
+    st.title("🧠 MQNotebook OCR")
+    uploaded_files = st.file_uploader("Drag and drop files here", accept_multiple_files=True, type=['pdf', 'docx', 'pptx', 'txt', 'png', 'jpg'])
+    
+    # THE FIX FOR WINERROR 32:
+    # Every time they click ingest, generate a NEW unique ID.
+    if st.button("Ingest (OCR Enabled)", type="primary"):
+        if uploaded_files:
+            with st.spinner("Running OCR and Indexing... This takes time for PDFs..."):
+                try:
+                    # Generate unique ID for this specific ingestion run
+                    session_id = str(uuid.uuid4())[:8]
+                    
+                    # Process using the unique ID
+                    index = process_documents(uploaded_files, session_id)
+                    
+                    if index:
+                        # Replace the old engine with the new one
+                        st.session_state.chat_engine = get_chat_engine(index, reranker)
+                        st.success(f"✅ Ingested {len(uploaded_files)} files into Session {session_id}!")
+                        # Clear old chat on new ingestion
+                        st.session_state.messages = [{"role": "assistant", "content": "New documents indexed with OCR. Ask me anything."}]
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Ingestion Failed: {str(e)}")
+                    st.warning("If PDF OCR failed, ensure Poppler is installed and in PATH.")
 
-# ---------------------------
-# Main Chat Area
-# ---------------------------
-st.markdown("### Workspace")
+    if st.button("Clear Conversation"):
+         st.session_state.messages = [{"role": "assistant", "content": "Conversation cleared."}]
+         st.rerun()
 
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
 
-# ---------------------------
-# Chat Input (ALWAYS VISIBLE)
-# ---------------------------
-prompt = st.chat_input("Ask your documents…")
+# Main Chat Interface (Same as before)
+st.header("MQNotebook")
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-if prompt:
+if prompt := st.chat_input("Ask about your documents..."):
     if not st.session_state.chat_engine:
-        st.warning("Upload and ingest documents first.")
+        st.warning("⚠️ Please ingest documents first.")
     else:
-        st.session_state.messages.append(
-            {"role": "user", "content": prompt}
-        )
-
+        st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
         with st.chat_message("assistant"):
-            with st.spinner("Thinking…"):
+            message_placeholder = st.empty()
+            with st.spinner("Thinking..."):
                 try:
                     response = st.session_state.chat_engine.chat(prompt)
-                    answer = response.response
-                    st.markdown(answer)
-
-                    st.session_state.messages.append(
-                        {"role": "assistant", "content": answer}
-                    )
-
-                    # Sources (clean, minimal)
-                    if response.source_nodes:
-                        with st.expander("Sources"):
-                            for node in response.source_nodes:
-                                meta = node.metadata
-                                name = meta.get("file_name", "Unknown")
-                                page = meta.get("page_label", "—")
-                                st.markdown(f"- **{name}** (page {page})")
-
-                except Exception:
-                    st.error("Query failed")
+                    message_placeholder.markdown(response.response)
+                    st.session_state.messages.append({"role": "assistant", "content": response.response})
+                    
+                    with st.expander("🔍 Source Evidence (OCR & Text)"):
+                        for node in response.source_nodes:
+                            meta = node.metadata
+                            fname = meta.get('file_name', 'Unknown')
+                            st.markdown(f"**Source:** `{fname}` (Score: {node.score:.3f})")
+                            st.caption(node.node.get_text()[:300] + "...")
+                            st.divider()
+                except Exception as e:
+                    message_placeholder.error(f"Error: {str(e)}")

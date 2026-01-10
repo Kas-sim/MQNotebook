@@ -1,182 +1,149 @@
-# processor.py
 import os
-import sys
-import pandas as pd
 import docx
-from pptx import Presentation # Direct control over slides
+from pptx import Presentation
+from pdf2image import convert_from_path
+import pytesseract
 from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, StorageContext, Document
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.core.memory import ChatMemoryBuffer
 from llama_index.readers.file import ImageReader
 import chromadb
-from config import DB_DIR, TEMP_DATA_DIR, Settings
 
-# ==========================================
-# 1. HARDCORE READERS (The Heavy Lifters)
-# ==========================================
+# IMPORT THE PATH FROM CONFIG
+from config import TEMP_DATA_DIR, DB_BASE_PATH, Settings, POPPLER_PATH
+
+class OcrPdfReader:
+    """
+    Ignores standard PDF text. Converts every page to an image
+    and runs Tesseract OCR on it. Handles flattened slides.
+    """
+    def load_data(self, file_path, extra_info=None):
+        print(f"🕵️‍♂️ OCR Scanning PDF: {os.path.basename(file_path)}...")
+        text_content = []
+        try:
+            # === THE FIX IS HERE ===
+            # We explicitly tell pdf2image where Poppler is.
+            images = convert_from_path(file_path, poppler_path=POPPLER_PATH)
+            
+            for i, image in enumerate(images):
+                print(f"   - OCRing Page {i+1}/{len(images)}...")
+                page_text = pytesseract.image_to_string(image)
+                
+                if page_text.strip():
+                   text_content.append(f"--- Page {i+1} ---")
+                   text_content.append(page_text)
+                   
+        except Exception as e:
+            print(f"⚠️ OCR Failed for {file_path}: {e}")
+            print(f"Current Configured Poppler Path: {POPPLER_PATH}")
+            raise e
+
+        full_text = "\n".join(text_content)
+        if not full_text.strip():
+             print(f"⚠️ Warning: No text found in {file_path} even with OCR.")
+             return []
+
+        return [Document(text=full_text, extra_info=extra_info or {})]
 
 class HardcoreDocxReader:
-    """Reads Word files by brute force."""
     def load_data(self, file, extra_info=None):
         doc = docx.Document(file)
         full_text = []
         for para in doc.paragraphs:
-            if para.text.strip():
-                full_text.append(para.text)
+            if para.text.strip(): full_text.append(para.text)
         for table in doc.tables:
             for row in table.rows:
-                row_data = [cell.text.strip() for cell in row.cells if cell.text.strip()]
-                if row_data:
-                    full_text.append(" | ".join(row_data))
-        
-        text = "\n\n".join(full_text)
-        return [Document(text=text, extra_info=extra_info or {})]
+                row_data = [c.text.strip() for c in row.cells if c.text.strip()]
+                if row_data: full_text.append(" | ".join(row_data))
+        return [Document(text="\n\n".join(full_text), extra_info=extra_info or {})] if full_text else []
 
 class HardcorePptxReader:
-    """
-    Iterates through every shape, text box, table, and speaker note.
-    Does not care about layout validation.
-    """
     def load_data(self, file, extra_info=None):
         prs = Presentation(file)
         full_text = []
-        
         for i, slide in enumerate(prs.slides):
-            slide_content = [f"--- Slide {i+1} ---"]
-            
-            # 1. Extract Text from Shapes (Titles, Body, TextBoxes)
+            slide_text = []
+            # Shapes & TextBoxes
             for shape in slide.shapes:
-                if hasattr(shape, "has_text_frame") and shape.has_text_frame:
-                    for paragraph in shape.text_frame.paragraphs:
-                        text = "".join(run.text for run in paragraph.runs).strip()
-                        if text:
-                            slide_content.append(text)
+                if hasattr(shape, "text_frame") and shape.text_frame.text.strip():
+                    slide_text.append(shape.text_frame.text.strip())
+            # Speaker Notes
+            if slide.has_notes_slide and slide.notes_slide.notes_text_frame.text.strip():
+                 slide_text.append(f"[Notes]: {slide.notes_slide.notes_text_frame.text.strip()}")
+            
+            if slide_text:
+                full_text.append(f"--- Slide {i+1} ---")
+                full_text.extend(slide_text)
                 
-                # 2. Extract Text from Tables
-                if shape.has_table:
-                    for row in shape.table.rows:
-                        row_text = " | ".join([cell.text_frame.text.strip() for cell in row.cells if cell.text_frame.text.strip()])
-                        if row_text:
-                            slide_content.append(f"[Table Row]: {row_text}")
-            
-            # 3. Extract Speaker Notes (Crucial context often hidden)
-            if slide.has_notes_slide and slide.notes_slide.notes_text_frame:
-                 notes = slide.notes_slide.notes_text_frame.text.strip()
-                 if notes:
-                     slide_content.append(f"[Speaker Notes]: {notes}")
-
-            # Only add the slide if we found text
-            if len(slide_content) > 1: 
-                full_text.extend(slide_content)
-
-        final_text = "\n\n".join(full_text)
-        
-        # Fallback: If PPT is just images, return empty string so we can error handle later
-        if not final_text.strip():
-            return [] # Empty list tells system "nothing here"
-            
-        return [Document(text=final_text, extra_info=extra_info or {})]
-
-class HardcoreExcelReader:
-    """
-    Flattens every sheet into a text format.
-    Uses Markdown table format for better LLM readability.
-    """
-    def load_data(self, file, extra_info=None):
-        try:
-            # Read all sheets
-            dfs = pd.read_excel(file, sheet_name=None)
-            full_text = []
-            
-            for sheet_name, df in dfs.items():
-                # clean empty rows/cols
-                df = df.dropna(how='all').dropna(axis=1, how='all')
-                
-                if not df.empty:
-                    full_text.append(f"--- Sheet: {sheet_name} ---")
-                    # Convert to markdown string (preserves structure for LLM)
-                    # We convert to string to ensure it's JSON serializable later if needed
-                    full_text.append(df.to_string(index=False))
-            
-            final_text = "\n\n".join(full_text)
-            return [Document(text=final_text, extra_info=extra_info or {})]
-            
-        except Exception as e:
-            print(f"Excel Error: {e}")
-            return []
+        return [Document(text="\n\n".join(full_text), extra_info=extra_info or {})] if full_text else []
 
 # ==========================================
-# 2. PIPELINE LOGIC
+# PIPELINE
 # ==========================================
 
 def get_file_extractors():
+    # Map extensions to our hardcore readers
     return {
+        ".pdf": OcrPdfReader(),   # <-- The new OCR Force
         ".docx": HardcoreDocxReader(),
-        ".pptx": HardcorePptxReader(), # <-- New Beast
-        ".xlsx": HardcoreExcelReader(), # <-- New Beast
-        ".jpg": ImageReader(text_type="text"),
+        ".pptx": HardcorePptxReader(),
+        # LlamaIndex's ImageReader uses Tesseract internally for jpg/png
+        ".jpg": ImageReader(text_type="text"), 
         ".png": ImageReader(text_type="text"),
     }
 
-def process_documents(uploaded_files):
-    if not uploaded_files:
-        return None
+def process_documents(uploaded_files, session_id_str):
+    if not uploaded_files: return None
 
-    # 1. Create unique temp directory
-    if not os.path.exists(TEMP_DATA_DIR):
-        os.makedirs(TEMP_DATA_DIR)
+    # Use the unique session ID for the temp folder
+    current_temp_dir = f"{TEMP_DATA_DIR}_{session_id_str}"
+    if not os.path.exists(current_temp_dir):
+        os.makedirs(current_temp_dir)
         
     for uploaded_file in uploaded_files:
-        file_path = os.path.join(TEMP_DATA_DIR, uploaded_file.name)
+        file_path = os.path.join(current_temp_dir, uploaded_file.name)
         with open(file_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
 
-    print(f"📂 Processing in unique folder: {DB_DIR}")
-
-    # 2. Load Data with Hardcore Parsers
+    # 1. Load with OCR and Hardcore Parsers
     documents = SimpleDirectoryReader(
-        input_dir=TEMP_DATA_DIR,
+        input_dir=current_temp_dir,
         file_extractor=get_file_extractors(),
         recursive=True
     ).load_data()
     
-    # FILTER: Remove empty docs immediately to stop "node missing content" error
-    valid_documents = [doc for doc in documents if doc.text and doc.text.strip()]
+    valid_docs = [d for d in documents if d.text and d.text.strip()]
+    if not valid_docs: raise ValueError("No usable text extracted from files (OCR failed or empty).")
 
-    if not valid_documents:
-        print("⚠️ All uploaded documents appear empty or unreadable.")
-        return None
-
-    # 3. Initialize Database
-    chroma_client = chromadb.PersistentClient(path=DB_DIR)
-    chroma_collection = chroma_client.get_or_create_collection("session_collection")
+    # 2. Database - Use a unique collection name per session
+    # We use one persistent base folder, but separate collections
+    chroma_client = chromadb.PersistentClient(path=DB_BASE_PATH)
+    collection_name = f"session_{session_id_str}"
+    chroma_collection = chroma_client.get_or_create_collection(collection_name)
     vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
-    # 4. Build Index
+    # 3. Index
     index = VectorStoreIndex.from_documents(
-        valid_documents, # Only pass valid docs
+        valid_docs,
         storage_context=storage_context,
         embed_model=Settings.embed_model,
         show_progress=True
     )
-    
     return index
 
 def get_chat_engine(index, reranker):
     memory = ChatMemoryBuffer.from_defaults(token_limit=15000)
-    
     chat_engine = index.as_chat_engine(
         chat_mode="context",
         memory=memory,
         node_postprocessors=[reranker],
-        similarity_top_k=10,
+        similarity_top_k=12,
         system_prompt=(
-            "You are an MQNotebook Assistant. "
-            "Analyze the provided uploaded files (Word, Excel, PPT) carefully. "
-            "Data from Excel has been converted to text tables - interpret them row by row. "
-            "Data from PPT includes slide numbers and speaker notes. "
-            "If the user asks about specific documents, refer to them by name. "
+            "You are an advanced OpenNotebook Assistant. "
+            "Data has been extracted using OCR from PDFs and raw text from Office docs. "
+            "Always cite the filename and slide/page number if available. "
+            "If the OCR text is messy, try your best to interpret the meaning."
         )
     )
     return chat_engine

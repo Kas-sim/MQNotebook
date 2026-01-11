@@ -1,104 +1,135 @@
-# app.py
 import streamlit as st
-import time
-from engine import RAGEngine
+import uuid
 
-# ---------------------------------------------------------
-# 1. PAGE CONFIG
-# ---------------------------------------------------------
+from config import init_settings, get_reranker, cleanup_on_startup
+from processor import process_documents, get_chat_engine
+
+if "startup_done" not in st.session_state:
+    cleanup_on_startup()
+    st.session_state.startup_done = True
+
 st.set_page_config(
-    page_title="DevShelf AI Assistant",
-    page_icon="📚",
-    layout="centered"
+    page_title="MQNotebook Pro",
+    page_icon="📑",
+    layout="wide"
 )
 
-# ---------------------------------------------------------
-# 2. LOAD ENGINE (CACHED)
-# ---------------------------------------------------------
-# This runs ONLY ONCE. Subsequent reloads use the cached object.
-# This prevents reloading the 1GB Embedding/Rerank models every interaction.
-@st.cache_resource(show_spinner="Loading Knowledge Base & Models...")
-def load_engine():
-    return RAGEngine()
+@st.cache_resource
+def setup_pipeline():
+    init_settings()
+    return get_reranker()
 
 try:
-    engine = load_engine()
+    reranker = setup_pipeline()
 except Exception as e:
-    st.error(f"Failed to load engine: {e}")
+    st.error(f"Startup Error: {e}")
     st.stop()
 
-# ---------------------------------------------------------
-# 3. SIDEBAR
-# ---------------------------------------------------------
-with st.sidebar:
-    st.title("📚 DevShelf RAG")
-    st.markdown("---")
-    st.markdown("**Status:** 🟢 Online")
-    st.markdown("**Model:** Mistral-7B (Free)")
-    st.markdown("**Embedding:** BAAI/bge-small")
-    st.markdown("---")
-    if st.button("Clear Chat History"):
-        st.session_state.messages = []
-        st.rerun()
+if "chat_engine" not in st.session_state:
+    st.session_state.chat_engine = None
 
-# ---------------------------------------------------------
-# 4. CHAT LOGIC
-# ---------------------------------------------------------
-st.title("💬 Chat with your Docs")
-
-# Initialize chat history
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Hello! Ask me anything about DevShelf's UI, Code, or Architecture."}
+        {
+            "role": "assistant",
+            "content": "👋 Hi! Upload documents from the sidebar and click **Ingest** to begin."
+        }
     ]
 
-# Display chat messages from history on app rerun
+with st.sidebar:
+    st.markdown("## MQNotebook OCR")
+    st.caption("Upload documents and build a private AI notebook.")
+
+    st.divider()
+
+    st.markdown("### 1. Upload Files")
+    uploaded_files = st.file_uploader(
+        "Supported formats: PDF, DOCX, PPTX, TXT, PNG, JPG",
+        accept_multiple_files=True,
+        label_visibility="collapsed"
+    )
+
+    st.markdown("### ⚙️ 2. Index Documents")
+    if st.button("🚀 Ingest Documents (OCR Enabled)", type="primary", use_container_width=True):
+        if not uploaded_files:
+            st.warning("Please upload at least one file.")
+        else:
+            with st.spinner("🔍 Running OCR and indexing… This may take a moment."):
+                try:
+                    session_id = str(uuid.uuid4())[:8]
+                    index = process_documents(uploaded_files, session_id)
+
+                    if index:
+                        st.session_state.chat_engine = get_chat_engine(index, reranker)
+                        st.session_state.messages = [
+                            {
+                                "role": "assistant",
+                                "content": "✅ Documents indexed successfully. Ask me anything about them."
+                            }
+                        ]
+                        st.success(f"Ingestion complete (Session ID: `{session_id}`)")
+                        st.rerun()
+
+                except Exception as e:
+                    st.error(f"Ingestion Failed: {e}")
+                    st.info("💡 Tip: If OCR fails on PDFs, ensure Poppler is installed and in PATH.")
+
+    st.divider()
+
+    st.markdown("### Session Controls")
+    if st.button("Clear Conversation", use_container_width=True):
+        st.session_state.messages = [
+            {"role": "assistant", "content": "🗑️ Conversation cleared. Upload or ask again."}
+        ]
+        st.rerun()
+
+    st.divider()
+
+    if st.session_state.chat_engine:
+        st.success("🟢 Index Ready")
+    else:
+        st.warning("🟡 No documents indexed")
+
+# -------------------------------------
+# Main Chat Area (UX POLISH)
+# -------------------------------------
+st.markdown("# 📘 MQNotebook")
+st.caption("Ask questions grounded in your uploaded documents.")
+
+st.divider()
+
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Accept user input
-if prompt := st.chat_input("How does the UI work?"):
-    # 1. Add user message to chat history
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+if prompt := st.chat_input("Ask a question about your documents…"):
+    if not st.session_state.chat_engine:
+        st.warning("Please ingest documents before asking questions.")
+    else:
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-    # 2. Generate Assistant Response
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        full_response = ""
-        
-        with st.spinner("Thinking & Searching..."):
-            try:
-                # Query the RAG Engine
-                response_obj = engine.query(prompt)
-                full_response = str(response_obj)
-                
-                # Stream the text result (Simulated typing effect)
-                message_placeholder.markdown(full_response)
-                
-                # 3. Show Sources (The "Smart" Part)
-                with st.expander("📚 View Sources & Relevance Scores"):
-                    seen_files = set()
-                    for node in response_obj.source_nodes:
-                        fname = node.metadata.get('file_name', 'Unknown')
-                        score = node.score
-                        
-                        # Filter out very low relevance scores if any slipped through
-                        if fname not in seen_files:
-                            st.markdown(f"**📄 {fname}**")
-                            st.caption(f"Confidence Score: `{score:.4f}`")
-                            st.text(node.node.get_text()[:200] + "...") # Preview text
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
+            with st.spinner("🤔 Thinking…"):
+                try:
+                    response = st.session_state.chat_engine.chat(prompt)
+                    message_placeholder.markdown(response.response)
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": response.response}
+                    )
+
+                    with st.expander("🔍 Source Evidence (OCR + Text)"):
+                        for node in response.source_nodes:
+                            meta = node.metadata
+                            fname = meta.get("file_name", "Unknown")
+                            st.markdown(
+                                f"**📄 {fname}**  \n"
+                                f"Relevance Score: `{node.score:.3f}`"
+                            )
+                            st.caption(node.node.get_text()[:300] + "…")
                             st.divider()
-                            seen_files.add(fname)
 
-            except Exception as e:
-                error_msg = f"❌ Error: {str(e)}"
-                if "429" in str(e):
-                    error_msg = "❌ OpenRouter Limit Exceeded (429). Please wait or switch keys."
-                message_placeholder.error(error_msg)
-                full_response = error_msg
-
-    # 4. Save assistant response to history
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
+                except Exception as e:
+                    message_placeholder.error(f"Error: {e}")

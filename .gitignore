@@ -83,3 +83,9 @@ Desktop.ini
 *.swo
 *~
 .whl
+
+.env
+__pycache__/
+temp_data_*/
+temp_chroma_db_*/
+chroma_storage/

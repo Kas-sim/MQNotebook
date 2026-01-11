@@ -1,15 +1,22 @@
 import streamlit as st
 import uuid
-# Import new config and processor functions
+
+# Import existing config and processor functions (UNCHANGED)
 from config import init_settings, get_reranker, cleanup_on_startup
 from processor import process_documents, get_chat_engine
 
-# 1. Run cleanup only once on server start
+# -------------------------------------
+# App Bootstrapping (UNCHANGED LOGIC)
+# -------------------------------------
 if "startup_done" not in st.session_state:
     cleanup_on_startup()
     st.session_state.startup_done = True
 
-st.set_page_config(page_title="MQNotebook Pro", page_icon="🧠", layout="wide")
+st.set_page_config(
+    page_title="MQNotebook Pro",
+    page_icon="🧠",
+    layout="wide"
+)
 
 @st.cache_resource
 def setup_pipeline():
@@ -22,53 +29,89 @@ except Exception as e:
     st.error(f"Startup Error: {e}")
     st.stop()
 
-# Initialize session state for chat engine
 if "chat_engine" not in st.session_state:
     st.session_state.chat_engine = None
+
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "Ready. Upload your slides (PDF/PPTX) or docs."}]
+    st.session_state.messages = [
+        {
+            "role": "assistant",
+            "content": "👋 Hi! Upload documents from the sidebar and click **Ingest** to begin."
+        }
+    ]
 
+# -------------------------------------
+# Sidebar – Ingestion Panel (UX POLISH)
+# -------------------------------------
 with st.sidebar:
-    st.title("🧠 MQNotebook OCR")
-    uploaded_files = st.file_uploader("Drag and drop files here", accept_multiple_files=True, type=['pdf', 'docx', 'pptx', 'txt', 'png', 'jpg'])
-    
-    # THE FIX FOR WINERROR 32:
-    # Every time they click ingest, generate a NEW unique ID.
-    if st.button("Ingest (OCR Enabled)", type="primary"):
-        if uploaded_files:
-            with st.spinner("Running OCR and Indexing... This takes time for PDFs..."):
+    st.markdown("## 🧠 MQNotebook OCR")
+    st.caption("Upload documents and build a private AI notebook.")
+
+    st.divider()
+
+    st.markdown("### 📤 1. Upload Files")
+    uploaded_files = st.file_uploader(
+        "Supported formats: PDF, DOCX, PPTX, TXT, PNG, JPG",
+        accept_multiple_files=True,
+        label_visibility="collapsed"
+    )
+
+    st.markdown("### ⚙️ 2. Index Documents")
+    if st.button("🚀 Ingest Documents (OCR Enabled)", type="primary", use_container_width=True):
+        if not uploaded_files:
+            st.warning("Please upload at least one file.")
+        else:
+            with st.spinner("🔍 Running OCR and indexing… This may take a moment."):
                 try:
-                    # Generate unique ID for this specific ingestion run
                     session_id = str(uuid.uuid4())[:8]
-                    
-                    # Process using the unique ID
                     index = process_documents(uploaded_files, session_id)
-                    
+
                     if index:
-                        # Replace the old engine with the new one
                         st.session_state.chat_engine = get_chat_engine(index, reranker)
-                        st.success(f"✅ Ingested {len(uploaded_files)} files into Session {session_id}!")
-                        # Clear old chat on new ingestion
-                        st.session_state.messages = [{"role": "assistant", "content": "New documents indexed with OCR. Ask me anything."}]
+                        st.session_state.messages = [
+                            {
+                                "role": "assistant",
+                                "content": "✅ Documents indexed successfully. Ask me anything about them."
+                            }
+                        ]
+                        st.success(f"Ingestion complete (Session ID: `{session_id}`)")
                         st.rerun()
+
                 except Exception as e:
-                    st.error(f"Ingestion Failed: {str(e)}")
-                    st.warning("If PDF OCR failed, ensure Poppler is installed and in PATH.")
+                    st.error(f"Ingestion Failed: {e}")
+                    st.info("💡 Tip: If OCR fails on PDFs, ensure Poppler is installed and in PATH.")
 
-    if st.button("Clear Conversation"):
-         st.session_state.messages = [{"role": "assistant", "content": "Conversation cleared."}]
-         st.rerun()
+    st.divider()
 
+    st.markdown("### 🧹 Session Controls")
+    if st.button("Clear Conversation", use_container_width=True):
+        st.session_state.messages = [
+            {"role": "assistant", "content": "🗑️ Conversation cleared. Upload or ask again."}
+        ]
+        st.rerun()
 
-# Main Chat Interface (Same as before)
-st.header("MQNotebook")
+    st.divider()
+
+    if st.session_state.chat_engine:
+        st.success("🟢 Index Ready")
+    else:
+        st.warning("🟡 No documents indexed")
+
+# -------------------------------------
+# Main Chat Area (UX POLISH)
+# -------------------------------------
+st.markdown("# 📘 MQNotebook")
+st.caption("Ask questions grounded in your uploaded documents.")
+
+st.divider()
+
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-if prompt := st.chat_input("Ask about your documents..."):
+if prompt := st.chat_input("Ask a question about your documents…"):
     if not st.session_state.chat_engine:
-        st.warning("⚠️ Please ingest documents first.")
+        st.warning("Please ingest documents before asking questions.")
     else:
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
@@ -76,18 +119,24 @@ if prompt := st.chat_input("Ask about your documents..."):
 
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
-            with st.spinner("Thinking..."):
+            with st.spinner("🤔 Thinking…"):
                 try:
                     response = st.session_state.chat_engine.chat(prompt)
                     message_placeholder.markdown(response.response)
-                    st.session_state.messages.append({"role": "assistant", "content": response.response})
-                    
-                    with st.expander("🔍 Source Evidence (OCR & Text)"):
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": response.response}
+                    )
+
+                    with st.expander("🔍 Source Evidence (OCR + Text)"):
                         for node in response.source_nodes:
                             meta = node.metadata
-                            fname = meta.get('file_name', 'Unknown')
-                            st.markdown(f"**Source:** `{fname}` (Score: {node.score:.3f})")
-                            st.caption(node.node.get_text()[:300] + "...")
+                            fname = meta.get("file_name", "Unknown")
+                            st.markdown(
+                                f"**📄 {fname}**  \n"
+                                f"Relevance Score: `{node.score:.3f}`"
+                            )
+                            st.caption(node.node.get_text()[:300] + "…")
                             st.divider()
+
                 except Exception as e:
-                    message_placeholder.error(f"Error: {str(e)}")
+                    message_placeholder.error(f"Error: {e}")

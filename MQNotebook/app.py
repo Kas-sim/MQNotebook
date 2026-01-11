@@ -1,20 +1,16 @@
 import streamlit as st
 import uuid
 
-# Import existing config and processor functions (UNCHANGED)
 from config import init_settings, get_reranker, cleanup_on_startup
 from processor import process_documents, get_chat_engine
 
-# -------------------------------------
-# App Bootstrapping (UNCHANGED LOGIC)
-# -------------------------------------
 if "startup_done" not in st.session_state:
     cleanup_on_startup()
     st.session_state.startup_done = True
 
 st.set_page_config(
     page_title="MQNotebook Pro",
-    page_icon="🧠",
+    page_icon="📑",
     layout="wide"
 )
 
@@ -40,16 +36,13 @@ if "messages" not in st.session_state:
         }
     ]
 
-# -------------------------------------
-# Sidebar – Ingestion Panel (UX POLISH)
-# -------------------------------------
 with st.sidebar:
-    st.markdown("## 🧠 MQNotebook OCR")
+    st.markdown("## MQNotebook OCR")
     st.caption("Upload documents and build a private AI notebook.")
 
     st.divider()
 
-    st.markdown("### 📤 1. Upload Files")
+    st.markdown("### 1. Upload Files")
     uploaded_files = st.file_uploader(
         "Supported formats: PDF, DOCX, PPTX, TXT, PNG, JPG",
         accept_multiple_files=True,
@@ -83,7 +76,7 @@ with st.sidebar:
 
     st.divider()
 
-    st.markdown("### 🧹 Session Controls")
+    st.markdown("### Session Controls")
     if st.button("Clear Conversation", use_container_width=True):
         st.session_state.messages = [
             {"role": "assistant", "content": "🗑️ Conversation cleared. Upload or ask again."}

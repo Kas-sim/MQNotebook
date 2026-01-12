@@ -1,8 +1,7 @@
-# config.py
 import os
 import shutil
 import time
-import platform # To detect Windows vs Linux
+import platform 
 from dotenv import load_dotenv
 from llama_index.core import Settings
 from llama_index.llms.openrouter import OpenRouter
@@ -12,43 +11,35 @@ import pytesseract
 
 load_dotenv()
 
-# ======================================================
-# 🔧 SMART OS CONFIGURATION
-# ======================================================
-
 if platform.system() == "Windows":
-    # YOUR LOCAL PATHS (Keep these exactly as they are on your PC)
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-    POPPLER_PATH = r"C:\Program Files\poppler-24.02.0\Library\bin" # <--- Your actual local path
-    print("🖥️ Running on Windows (Local Mode)")
+    POPPLER_PATH = r"C:\Program Files\poppler-24.02.0\Library\bin" 
+    print("️Running on Windows (Local Mode)")
 else:
-    # CLOUD / LINUX PATHS (Streamlit Cloud, DigitalOcean, etc.)
-    # In Linux, these are installed in the global system path, so we don't need hardcoded locations.
     pytesseract.pytesseract.tesseract_cmd = "tesseract"
-    POPPLER_PATH = None # pdf2image finds it automatically on Linux
+    POPPLER_PATH = None 
     print("☁️ Running on Linux (Cloud Mode)")
 
-# ======================================================
 
-# Generate a unique ID based on time
 SESSION_TIMESTAMP = int(time.time())
-TEMP_DATA_DIR = f"temp_data_{SESSION_TIMESTAMP}" # Removed ./ for cleaner linux paths
+TEMP_DATA_DIR = f"temp_data_{SESSION_TIMESTAMP}" 
 DB_BASE_PATH = "chroma_storage"
 
-def init_settings():
-    # Helper to get key from either .env (local) or Streamlit Secrets (cloud)
-    import streamlit as st
+def init_settings(user_api_key=None):
+    if user_api_key:
+        api_key = user_api_key
+    else:
+        import streamlit as st
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key and hasattr(st, "secrets"):
+            try:
+                api_key = st.secrets["OPENROUTER_API_KEY"]
+            except:
+                pass
     
-    # Try getting key from environment, otherwise try Streamlit secrets
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    if not api_key and hasattr(st, "secrets"):
-        try:
-            api_key = st.secrets["OPENROUTER_API_KEY"]
-        except:
-            pass
 
     if not api_key:
-        raise ValueError("❌ OPENROUTER_API_KEY missing. Set it in .env or Streamlit Secrets.")
+        raise ValueError("No API key available. Please provide one.")
 
     Settings.llm = OpenRouter(
         api_key=api_key,
@@ -68,12 +59,13 @@ def get_reranker():
     )
 
 def cleanup_on_startup():
-    print("🧹 Running startup cleanup...")
-    root = "."
-    for item in os.listdir(root):
-        if os.path.isdir(item) and item.startswith("temp_data_"):
-            try:
-                shutil.rmtree(item, ignore_errors=True)
-                print(f"   Deleted old temp data: {item}")
-            except Exception as e:
-                 print(f"   ⚠️ Could not delete busy folder {item}: {e}")
+    if platform.system() == "Windows":
+        print("🧹 Running startup cleanup...")
+        root = "."
+        for item in os.listdir(root):
+            if os.path.isdir(item) and item.startswith("temp_data_"):
+                try:
+                    shutil.rmtree(item, ignore_errors=True)
+                    print(f" Deleted old temp data: {item}")
+                except Exception as e:
+                    print(f" ⚠️ Could not delete busy folder {item}: {e}")

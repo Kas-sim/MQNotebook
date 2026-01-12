@@ -1,7 +1,8 @@
+# config.py
 import os
 import shutil
 import time
-import platform 
+import platform
 from dotenv import load_dotenv
 from llama_index.core import Settings
 from llama_index.llms.openrouter import OpenRouter
@@ -11,35 +12,41 @@ import pytesseract
 
 load_dotenv()
 
+# ======================================================
+# 🔧 SMART OS CONFIGURATION
+# ======================================================
 if platform.system() == "Windows":
+    # Local Windows Paths
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-    POPPLER_PATH = r"C:\Program Files\poppler-24.02.0\Library\bin" 
-    print("️Running on Windows (Local Mode)")
+    POPPLER_PATH = r"C:\Program Files\poppler-24.02.0\Library\bin" # <--- Check your local path
 else:
+    # Cloud / Linux Paths
     pytesseract.pytesseract.tesseract_cmd = "tesseract"
-    POPPLER_PATH = None 
-    print("☁️ Running on Linux (Cloud Mode)")
-
+    POPPLER_PATH = None
 
 SESSION_TIMESTAMP = int(time.time())
-TEMP_DATA_DIR = f"temp_data_{SESSION_TIMESTAMP}" 
+TEMP_DATA_DIR = f"temp_data_{SESSION_TIMESTAMP}"
 DB_BASE_PATH = "chroma_storage"
 
+# --- THE FIX IS HERE: Add (user_api_key=None) ---
 def init_settings(user_api_key=None):
+    # 1. Use User Key if provided (Pro Mode)
     if user_api_key:
         api_key = user_api_key
     else:
+        # 2. Fallback to Server Key (Free Mode)
         import streamlit as st
         api_key = os.getenv("OPENROUTER_API_KEY")
+        
+        # Check Streamlit secrets if .env fails
         if not api_key and hasattr(st, "secrets"):
             try:
                 api_key = st.secrets["OPENROUTER_API_KEY"]
             except:
                 pass
     
-
     if not api_key:
-        raise ValueError("No API key available. Please provide one.")
+        raise ValueError("❌ No API Key available. Please provide one.")
 
     Settings.llm = OpenRouter(
         api_key=api_key,
@@ -66,6 +73,5 @@ def cleanup_on_startup():
             if os.path.isdir(item) and item.startswith("temp_data_"):
                 try:
                     shutil.rmtree(item, ignore_errors=True)
-                    print(f" Deleted old temp data: {item}")
                 except Exception as e:
-                    print(f" ⚠️ Could not delete busy folder {item}: {e}")
+                     print(f"   ⚠️ Could not delete busy folder {item}")

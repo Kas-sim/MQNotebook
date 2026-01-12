@@ -6,8 +6,8 @@ from config import init_settings, get_reranker, cleanup_on_startup
 from processor import process_documents, get_chat_engine
 
 # --- CONFIGURATION CONSTANTS ---
-MAX_FREE_QUESTIONS = 10      # Limit for free users per session
-FREE_COOLDOWN_SECONDS = 5    # Prevent spamming (1 request every 5s)
+MAX_FREE_QUESTIONS = 10      
+FREE_COOLDOWN_SECONDS = 5    
 
 # 1. Run cleanup once
 if "startup_done" not in st.session_state:
@@ -25,6 +25,9 @@ if "question_count" not in st.session_state:
     st.session_state.question_count = 0
 if "last_request_time" not in st.session_state:
     st.session_state.last_request_time = 0
+# NEW: Persistent storage for User Key
+if "user_pro_key" not in st.session_state:
+    st.session_state.user_pro_key = None
 
 # --- CACHE RESOURCES ---
 @st.cache_resource
@@ -51,16 +54,41 @@ with st.sidebar:
         "Select Mode:", 
         ["Free (Default Key)", "Pro (My API Key)"],
         index=0,
-        help="Free mode is limited to 10 questions. Pro mode uses your OpenRouter Key for unlimited access."
+        help="Free mode is limited. Pro mode uses your own OpenRouter Key."
     )
     
-    user_key = None
+    active_key = None
+
+    # --- PRO MODE UX LOGIC ---
     if mode == "Pro (My API Key)":
-        user_key = st.text_input("Enter OpenRouter API Key", type="password", placeholder="sk-or-...")
-        if not user_key:
-            st.warning("⚠️ Please enter your API Key to proceed.")
+        # Check if we already have a key saved in session
+        if st.session_state.user_pro_key:
+            st.success("✅ Custom Key Active")
+            active_key = st.session_state.user_pro_key
+            
+            # Button to remove key (restore input box)
+            if st.button("🗑️ Remove Key"):
+                st.session_state.user_pro_key = None
+                st.rerun()
+        else:
+            st.markdown("Don't have a key? [Grab one free at OpenRouter](https://openrouter.ai/keys)")
+            
+            # The Input Box
+            key_input = st.text_input(
+                "Enter OpenRouter API Key", 
+                type="password", 
+                placeholder="sk-or-...",
+                help="Press Enter to save"
+            )
+            
+            # Logic to save and hide
+            if key_input:
+                st.session_state.user_pro_key = key_input
+                st.rerun() # <--- Force reload to hide the input box instantly
+    
+    # --- FREE MODE UX LOGIC ---
     else:
-        # Show Usage Meter for Free Users
+        # Show Usage Meter
         remaining = MAX_FREE_QUESTIONS - st.session_state.question_count
         st.progress(st.session_state.question_count / MAX_FREE_QUESTIONS, text=f"Free Quota: {remaining} left")
         if remaining <= 0:
@@ -79,7 +107,8 @@ with st.sidebar:
         else:
             # CHECK API KEY BEFORE INGESTION
             try:
-                init_settings(user_key) # Initialize with correct key
+                # Pass the active_key (if any) to the settings
+                init_settings(active_key) 
                 
                 with st.spinner("Processing & Indexing... (OCR enabled)"):
                     session_id = str(uuid.uuid4())[:8]
@@ -88,9 +117,9 @@ with st.sidebar:
                     if index:
                         st.session_state.chat_engine = get_chat_engine(index, reranker)
                         st.session_state.messages = [{"role": "assistant", "content": "Documents indexed! Ask me anything."}]
-                        st.session_state.question_count = 0 # Reset count on new ingestion
+                        st.session_state.question_count = 0 
                         st.success("✅ Ready!")
-                        time.sleep(1) # Small UX pause
+                        time.sleep(1)
                         st.rerun()
             except Exception as e:
                 st.error(f"Error: {str(e)}")
@@ -121,12 +150,10 @@ if prompt := st.chat_input("Ask about your documents..."):
 
     # 2. Check Rate Limits (Only for Free Mode)
     if mode == "Free (Default Key)":
-        # Check Total Count
         if st.session_state.question_count >= MAX_FREE_QUESTIONS:
-            st.error(f"🛑 Free limit reached ({MAX_FREE_QUESTIONS} Qs). Please refresh or use your own API key.")
+            st.error(f"🛑 Free limit reached ({MAX_FREE_QUESTIONS} Qs). Switch to Pro Mode or refresh.")
             st.stop()
         
-        # Check Cooldown (Spam Prevention)
         current_time = time.time()
         if (current_time - st.session_state.last_request_time) < FREE_COOLDOWN_SECONDS:
             st.warning(f"⏳ Please wait {FREE_COOLDOWN_SECONDS}s between questions.")
@@ -144,8 +171,8 @@ if prompt := st.chat_input("Ask about your documents..."):
         message_placeholder = st.empty()
         with st.spinner("Thinking..."):
             try:
-                # Ensure settings are active (redundant safety)
-                init_settings(user_key)
+                # Ensure settings are active with the correct key
+                init_settings(active_key)
                 
                 response = st.session_state.chat_engine.chat(prompt)
                 message_placeholder.markdown(response.response)
@@ -153,7 +180,6 @@ if prompt := st.chat_input("Ask about your documents..."):
                 
                 with st.expander("🔍 Source Evidence"):
                     for node in response.source_nodes:
-                        # Extract metadata
                         fname = node.metadata.get('file_name', 'Unknown')
                         page = node.metadata.get('page_label', 'N/A')
                         score = node.score if node.score else 0.0

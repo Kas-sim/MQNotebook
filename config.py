@@ -18,7 +18,7 @@ load_dotenv()
 if platform.system() == "Windows":
     # Local Windows Paths
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-    POPPLER_PATH = r"C:\Program Files\poppler-24.02.0\Library\bin" # <--- Check your local path
+    POPPLER_PATH = r"C:\Program Files\poppler\poppler-25.12.0\Library\bin"
 else:
     # Cloud / Linux Paths
     pytesseract.pytesseract.tesseract_cmd = "tesseract"

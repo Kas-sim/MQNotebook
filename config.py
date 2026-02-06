@@ -50,7 +50,7 @@ def init_settings(user_api_key=None):
 
     Settings.llm = OpenRouter(
         api_key=api_key,
-        model="mistralai/mistral-7b-instruct:free",
+        model="google/gemini-2.0-flash-001",
         temperature=0.1,
         max_tokens=4096,
         context_window=32000,

@@ -254,7 +254,7 @@ if prompt := st.chat_input("Ask about your documents..."):
                         page = node.metadata.get('page_label', 'N/A')
                         score = node.score if node.score else 0.0
                         st.markdown(f"**File:** `{fname}` | **Page:** `{page}` | **Conf:** `{score:.2f}`")
-                        st.caption(node.node.get_text()[:300] + "...")
+                        st.caption(node.node.get_content()[:300] + "...")
                         st.divider()
                         
             except Exception as e:
